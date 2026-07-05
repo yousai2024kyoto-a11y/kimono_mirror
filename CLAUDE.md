@@ -85,12 +85,13 @@ npm run lint     # ESLint
 `HandTrackingContext.jsx` がProviderとして機能。内部動作:
 - `videoRef` の映像を~15fps（66ms間隔）のrAFループで解析（自前ではカメラを起動しない。映像は `Camera.jsx` が供給）
 - `maxNumHands: 2`。両手の人差し指（landmark[8]）の座標を `fingerPositions`（手ごとの配列）として配信
+- 検出オプションは `modelComplexity: 0`、`minDetectionConfidence` / `minTrackingConfidence: 0.7`（検出感度の調整はここ）。`window.Hands` と `videoRef` が揃うまで500ms間隔でポーリングして開始するため、CDNの `hands.js` が読み込めない環境ではジェスチャーが**エラー表示なしで無効**のままになる（クリック操作は生きる）。なお `index.html` は camera_utils / control_utils / hands の3スクリプトをCDNロードしているが、実際に使われるのは hands.js（`window.Hands`）のみ
 - 座標は正規化値 (0-1)。Contextが公開する `toScreenCoords(fp)` で画面ピクセルに変換する。X軸は鏡映りのため `1 - fp.x` で反転し、さらに映像の `object-fit: cover` クロップ（scale + offset）を補正する。**生の `(1 - fp.x) * innerWidth` ではなく必ず `toScreenCoords` を使うこと**（さもないとアスペクト比のずれでヒット判定がずれる）
 - `useGestureHover.js` フックが `toScreenCoords` でボタン要素との交差を判定し、ホバー継続時間に応じて `progress` (0-100) を返す。発火後は `cooldown` 中 `isBlockedRef` で再発火をブロック
 
 UIのジェスチャー対応ボタンは3系統:
 - `ShutterButton` — 2段階: ホバー/クリックでカウントダウン開始(3-2-1) → 0でcanvasに映像をキャプチャ → base64でonCapture呼び出し。フロントカメラ時は左右反転。キャプチャはカメラのフルフレームではなく**画面に見えている領域**（`takePhoto` が `toScreenCoords` と同じ cover クロップ計算を `window.innerWidth/innerHeight` 基準で複製している。カメラ表示レイアウトを全画面以外に変える場合は両方の計算を同時更新）。出力は長辺1280px以下・JPEG品質0.85 — これがAPIの10MBボディ上限内に収まる前提なので、解像度/品質を上げるときは上限に注意。省略可能な `isShootingRef` prop で撮影ロックを複数ボタン間で共有できる: Yukataは上下2つのShutterButtonに同一refを渡して二重カウントダウンを防いでいるが、**Furisodeは渡していない**ため2ボタンのロックは独立（修正するならYukataの配線を踏襲）
-- `GestureButton` — 汎用のホバー発火ボタン（Previewの「再撮影」「印刷」等）。`HandPointer` が指先カーソルを描画する
+- `GestureButton` — 汎用のホバー発火ボタン（帯色/人物/背景セレクタの各チップ、Previewの「再撮影」等）。`HandPointer` が指先カーソルを描画する
 - `HomeButton` — Yukata/Furisodeのホーム戻りボタン。`useGestureHover` / `toScreenCoords` を**使わない独立実装**で、生の正規化座標をハードコード領域（`fp.x` 0–0.3, `fp.y` 0–0.2 = 鏡像反転で画面右上）と照合し、独自の setTimeout（2500ms。コード内コメントの「3秒」は誤り）でドウェル判定する。一度発火すると `isClickedRef` がリセットされず、アンマウントまでジェスチャー再発火が永久にブロックされる（クールダウンなし）
 
 前面/背面カメラの鏡像処理は3ファイルにまたがる契約: `Camera.jsx` がトラックの `facingMode`/label で背面を判定し、前面のときだけ `<video>` を `scaleX(-1)` 反転して `onFacingModeChange` でページに通知 → ページが `ShutterButton` の `isFrontCamera` に渡しキャプチャも同条件で反転する。ただし `toScreenCoords` だけは**カメラ向きに関係なく常にX反転する**ため、`preferredCameraId` で背面カメラを選ぶとポインタ/ヒット判定が左右逆になる（既知の非対称）。また `deviceId` 指定が失敗すると `Camera.jsx` は `video: true` にフォールバックするが、このとき `isFrontCamera` は初期値 true のまま更新されない。
